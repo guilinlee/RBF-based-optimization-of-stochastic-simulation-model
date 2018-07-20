@@ -1,0 +1,182 @@
+function Example
+%% deterministic design input: 2 dimension: r0 and zL
+XMax=1.5;
+XMin=0.5;
+XRange=XMax-XMin;
+XDesign=[0:(1/5):1]';
+n1=size(XDesign,1);
+UncodedXDesign=XDesign*XRange+XMin;
+AMax=3;
+AMin=0;
+ARange=AMax-AMin;
+ADesign=[0:(1/5):1]';
+UncodedADesign=ADesign*ARange+AMin;
+[D1,D2]=ndgrid(XDesign,ADesign);
+Design=[D1(:) D2(:)];
+%% number of design point
+%%%%%number of observations at each design point
+Rep=30;
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% generate data Y|X from the computer model
+Y=zeros(n1,Rep);
+for i=1:n1
+    for repi=1:Rep
+         Y(i,repi)=computermodel((UncodedXDesign(i,:)));
+    end
+    %
+end
+Yexp=Y;
+Rdata=Y2R(Y,UncodedXDesign,UncodedADesign);
+%%RBF fit to the Rdata from simulator  [hopt, miu, RIRes]=RBFFit2(Xin,Ain,Rin)
+[hopt, miu, inverseBRes]=RBFFit2(XDesign,ADesign,Rdata);
+Rhat=RBFPredict2(Design,Design,hopt,miu,inverseBRes);
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Prediction of testset
+Xtest=[0:(1/1000):1]';Atest=[0:(1/1000):1]';
+UncodedXtest=Xtest*XRange+XMin;
+UncodedAtest=Atest*ARange+AMin;
+dimtest1=size(Xtest,1);dimtest2=size(Atest,1);
+[Testset1,Testset2]=ndgrid(Xtest,Atest);
+TestSet=[Testset1(:) Testset2(:)];
+ntest=size(TestSet,1);
+[unTestset1,unTestset2]=ndgrid(UncodedXtest,UncodedAtest);
+UncodedTestSet=[unTestset1(:),unTestset2(:)];
+Rhat=RBFPredict2(TestSet,Design,hopt,miu,inverseBRes);
+mesh(UncodedXtest,UncodedAtest,vec2mat(Rhat,dimtest1))
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%% mean square error of the prediction
+Xtest=[0:(1/20):1]';Atest=[0:(1/20):1]';
+UncodedXtest=Xtest*XRange+XMin;
+UncodedAtest=Atest*ARange+AMin;
+dimtest1=size(Xtest,1);dimtest2=size(Atest,1);
+[Testset1,Testset2]=ndgrid(Xtest,Atest);
+TestSet=[Testset1(:) Testset2(:)];
+ntest=size(TestSet,1);
+[unTestset1,unTestset2]=ndgrid(UncodedXtest,UncodedAtest);
+UncodedTestSet=[unTestset1(:),unTestset2(:)];
+Rhat=RBFPredict2(TestSet,Design,hopt,miu,inverseBRes);
+[Rtrue,hopttrue, miutrue, inverseBRestrue]=truesrf(100);
+MSE=mean((Rtrue-Rhat).^2)
+%%%%%
+xlab=[1:1:441]
+figure(1001), hold on
+plot(xlab,Rtrue,'LineWidth',1,'color','b')
+plot(xlab,Rhat,'x','color','c')
+%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%optimal design point for different A 
+optimdesignfit=[(0:0.01:3);(0:0.01:3);(0:0.01:3)]';
+i=0;
+for A=0:0.01:3
+   i=i+1;
+f = @(x)nRBFPredict(x, A, XRange, XMin,ARange, AMin, Design,hopt,miu,inverseBRes);
+[optimdesign,optimdesire]=fminbnd(f,0.5,1.5);
+optimdesignfit(i,:)=[optimdesign, -optimdesire,A];
+end
+%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%
+%%calculate the robustness measure for each optimal solution
+testlength=size([0:0.01:3],2);
+meanratiolist=[0:0.01:3];
+for j=1:testlength
+    starvalue=optimdesignfit(j,1);
+ [meanratio]=robustdesire(starvalue, optimdesignfit, XRange, XMin,ARange, AMin, Design,hopt,miu,inverseBRes);
+ meanratiolist(j)=meanratio;
+end
+%%%
+ plot(optimdesignfit(:,1), meanratiolist)
+ r=find(meanratiolist==max(meanratiolist));
+ optimdesignfit(r,1)
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%bootstrap to get the expceted loss R 
+nboot=1000;
+ExpectedRBoot=zeros(ntest,nboot);
+for i=1:nboot
+    Yboot=zeros(n1,Rep);
+    for j=1:n1
+        indices=randsample(1:Rep,Rep,'true');
+        Yboot(j,:)=Y(j,indices);
+    end
+    Rdataboot=Y2R(Yboot,UncodedXDesign,UncodedADesign);
+    [bhopt, bmiu, binverseBRes]=RBFFit2(XDesign,ADesign,Rdataboot);
+    bRhat=RBFPredict2(TestSet,Design,bhopt,bmiu,binverseBRes);
+    ExpectedRBoot(:,i)=bRhat;
+end
+
+MeanExpectedRBoot=mean(ExpectedRBoot,2);
+UCL=prctile(ExpectedRBoot,99,2);
+LCL=prctile(ExpectedRBoot,1,2);
+
+%%%%%%
+[LCL,Rtrue, UCL]
+xlab=[1:1:21]
+figure(1001), hold on
+%plot(xlab,MeanExpectedRBoot(1:40),'LineWidth',1,'color','b')
+plot(xlab,Rtrue(1:21),'LineWidth',1,'color','b')
+plot(xlab,UCL(1:21),'x','color','c')
+plot(xlab,LCL(1:21),'x','color','r')
+%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%bootstrap for confidence interval of optimal design as a function
+%%%%%%%%%of the uncertain parameters
+nboot=1000;
+ExpectedRBoot=zeros(301,nboot);
+for i=1:nboot
+    Yboot=zeros(n1,Rep);
+    for j=1:n1
+        indices=randsample(1:Rep,Rep,'true');
+        Yboot(j,:)=Y(j,indices);
+    end
+    Rdataboot=Y2R(Yboot,UncodedXDesign,UncodedADesign);
+    [bhopt, bmiu, binverseBRes]=RBFFit2(XDesign,ADesign,Rdataboot);
+    optimdesignv=[0:0.01:3];
+    k=0;
+    for A=0:0.01:3
+    k=k+1;
+    f = @(x)nRBFPredict(x, A, XRange, XMin,ARange, AMin, Design,bhopt,bmiu,binverseBRes);
+    optimdesign=fminbnd(f,0.5,1.5);
+    optimdesignv(k)=optimdesign;
+    end
+%%%%%%%%%%%%%    
+    ExpectedRBoot(:,i)=optimdesignv;
+end
+
+UCL=prctile(ExpectedRBoot,97.5,2);
+LCL=prctile(ExpectedRBoot,2.5,2);
+
+%%%%%%
+optimal_r0=optimdesignfit(:,1)
+[LCL,optimal_r0, UCL]
+xlab=0:0.01:3;
+figure(1001), hold on
+plot(xlab,optimal_r0,'LineWidth',1,'color','b')
+plot(xlab,UCL,'x','color','c')
+plot(xlab,LCL,'x','color','r')
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%every different theta
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%fit one rbf
+[hopt, miu, inverseBRes]=RBFFit2(XDesign,ADesign,Rdata);
+A=[0:0.01:3]
+
+optimdesignv=[0:0.01:3];
+i=0
+for A=0:0.01:3
+   i=i+1;
+   Rdatai=Y2R(Y,UncodedXDesign,A);
+  [hopt, miu, inverseBRes]=RBFFitx(XDesign,Rdatai);
+f = @(x)nRBFPredictone(x,XRange, XMin, XDesign,hopt,miu,inverseBRes);
+optimdesign=fminbnd(f,0.5,1.5);
+optimdesignv(i)=optimdesign;
+end
+Axlab=[0:0.01:3];
+plot(Axlab,optimdesignv)
+%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+
+
